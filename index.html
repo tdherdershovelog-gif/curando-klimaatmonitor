@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Curando Klimaatmonitor</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f7f8;
+      --card: #ffffff;
+      --text: #1d2a2f;
+      --muted: #66757d;
+      --border: #dce5e8;
+      --ok: #dff5e5;
+      --warn: #fff0c7;
+      --crit: #ffd9d9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--border);
+      padding: 18px 20px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { margin: 0; font-size: 1.5rem; }
+    header p { margin: 6px 0 0; color: var(--muted); }
+    main { max-width: 1250px; margin: 0 auto; padding: 20px; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .summary-card, .location {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 3px 12px rgba(0,0,0,.05);
+    }
+    .summary-card { padding: 16px; }
+    .summary-card .value { font-size: 1.7rem; font-weight: bold; margin-top: 6px; }
+    .summary-card .label { color: var(--muted); }
+    .location { margin-bottom: 20px; overflow: hidden; }
+    .location h2 { margin: 0; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+    .department { padding: 16px 18px; border-bottom: 1px solid var(--border); }
+    .department:last-child { border-bottom: 0; }
+    .department h3 { margin: 0 0 12px; }
+    .rooms {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+    }
+    .room {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .room.ok { background: var(--ok); }
+    .room.warn { background: var(--warn); }
+    .room.crit { background: var(--crit); }
+    .room-name { font-weight: bold; }
+    .temp { font-size: 1.5rem; margin: 6px 0 2px; }
+    .status, .updated { color: var(--muted); font-size: .9rem; }
+    .error {
+      background: #fff0f0;
+      border: 1px solid #f0b7b7;
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 20px;
+    }
+    .loading { padding: 30px; text-align: center; color: var(--muted); }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Curando Klimaatmonitor</h1>
+  <p>Live overzicht op basis van de recentste meting per ruimte</p>
+</header>
+
+<main>
+  <div id="error"></div>
+  <div id="summary" class="summary"></div>
+  <div id="content" class="loading">Gegevens laden…</div>
+</main>
+
+<script>
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRCYp9O1teedA7Xnv1zz35P_jWyqNkCmawv6L5DFKvoWqJTB_OdR6Z0uuA2D8fsH67FvWM5UxHpZgjH/pub?gid=887533477&single=true&output=csv';
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const next = text[i + 1];
+
+    if (c === '"') {
+      if (quoted && next === '"') {
+        field += '"';
+        i++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (c === ',' && !quoted) {
+      row.push(field);
+      field = '';
+    } else if ((c === '\n' || c === '\r') && !quoted) {
+      if (c === '\r' && next === '\n') i++;
+      row.push(field);
+      if (row.some(v => v !== '')) rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += c;
+    }
+  }
+  if (field || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function normalizeNumber(value) {
+  return Number(String(value).replace(',', '.'));
+}
+
+function statusClass(temp) {
+  if (temp >= 28) return 'crit';
+  if (temp >= 26) return 'warn';
+  return 'ok';
+}
+
+function statusLabel(temp) {
+  if (temp >= 28) return '🔴 Kritiek';
+  if (temp >= 26) return '🟠 Hoog risico';
+  return '🟢 OK';
+}
+
+function parseDate(value) {
+  if (!value) return new Date(0);
+  const iso = new Date(value);
+  if (!isNaN(iso)) return iso;
+
+  const match = value.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4}).*?(\d{1,2}):(\d{2})/);
+  if (match) {
+    return new Date(+match[3], +match[2] - 1, +match[1], +match[4], +match[5]);
+  }
+  return new Date(0);
+}
+
+function escapeHTML(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+async function loadData() {
+  try {
+    const response = await fetch(CSV_URL, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = await response.text();
+    const parsed = parseCSV(text);
+
+    if (parsed.length < 2) throw new Error('Het werkblad bevat nog geen gegevens.');
+
+    const headers = parsed[0].map(h => h.trim());
+    const required = ['created', 'Locatie', 'Afdeling', 'Ruimte', 'Temperatuur'];
+    const missing = required.filter(h => !headers.includes(h));
+    if (missing.length) {
+      throw new Error('Ontbrekende kolommen: ' + missing.join(', '));
+    }
+
+    const records = parsed.slice(1).map(row => {
+      const obj = {};
+      headers.forEach((h, i) => obj[h] = row[i] ?? '');
+      obj._temp = normalizeNumber(obj.Temperatuur);
+      obj._date = parseDate(obj.created);
+      return obj;
+    }).filter(r =>
+      r.Locatie &&
+      r.Afdeling &&
+      r.Ruimte &&
+      Number.isFinite(r._temp)
+    );
+
+    const latest = new Map();
+    for (const row of records) {
+      const key = `${row.Locatie}|${row.Afdeling}|${row.Ruimte}`;
+      const previous = latest.get(key);
+      if (!previous || row._date > previous._date) latest.set(key, row);
+    }
+
+    render([...latest.values()]);
+  } catch (error) {
+    document.getElementById('error').innerHTML =
+      `<div class="error"><strong>Gegevens konden niet worden geladen.</strong><br>${escapeHTML(error.message)}</div>`;
+    document.getElementById('content').innerHTML = '';
+  }
+}
+
+function render(rows) {
+  rows.sort((a, b) =>
+    a.Locatie.localeCompare(b.Locatie) ||
+    a.Afdeling.localeCompare(b.Afdeling) ||
+    b._temp - a._temp
+  );
+
+  const critical = rows.filter(r => r._temp >= 28).length;
+  const warning = rows.filter(r => r._temp >= 26 && r._temp < 28).length;
+  const ok = rows.filter(r => r._temp < 26).length;
+  const hottest = [...rows].sort((a, b) => b._temp - a._temp)[0];
+  const newest = [...rows].sort((a, b) => b._date - a._date)[0];
+
+  document.getElementById('summary').innerHTML = `
+    <div class="summary-card">
+      <div class="label">Warmste ruimte</div>
+      <div class="value">${hottest ? hottest._temp.toFixed(1) + '°C' : '—'}</div>
+      <div>${hottest ? escapeHTML(hottest.Locatie + ' · ' + hottest.Afdeling + ' · ' + hottest.Ruimte) : ''}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Kritiek</div>
+      <div class="value">🔴 ${critical}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Hoog risico</div>
+      <div class="value">🟠 ${warning}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">OK</div>
+      <div class="value">🟢 ${ok}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Laatste update</div>
+      <div class="value" style="font-size:1.05rem">${
+        newest && newest._date.getTime()
+          ? newest._date.toLocaleString('nl-BE')
+          : 'Onbekend'
+      }</div>
+    </div>
+  `;
+
+  const grouped = {};
+  for (const row of rows) {
+    grouped[row.Locatie] ??= {};
+    grouped[row.Locatie][row.Afdeling] ??= [];
+    grouped[row.Locatie][row.Afdeling].push(row);
+  }
+
+  let html = '';
+  for (const [location, departments] of Object.entries(grouped)) {
+    html += `<section class="location"><h2>📍 ${escapeHTML(location)}</h2>`;
+    for (const [department, rooms] of Object.entries(departments)) {
+      html += `<div class="department"><h3>${escapeHTML(department)}</h3><div class="rooms">`;
+      for (const room of rooms) {
+        html += `
+          <div class="room ${statusClass(room._temp)}">
+            <div class="room-name">${escapeHTML(room.Ruimte)}</div>
+            <div class="temp">${room._temp.toFixed(1)}°C</div>
+            <div class="status">${statusLabel(room._temp)}</div>
+            <div class="updated">${room._date.getTime() ? room._date.toLocaleString('nl-BE') : ''}</div>
+          </div>`;
+      }
+      html += `</div></div>`;
+    }
+    html += `</section>`;
+  }
+
+  document.getElementById('content').className = '';
+  document.getElementById('content').innerHTML = html;
+}
+
+loadData();
+setInterval(loadData, 5 * 60 * 1000);
+</script>
+</body>
+</html>
