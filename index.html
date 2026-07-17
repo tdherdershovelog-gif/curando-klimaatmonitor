@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Curando Klimaatmonitor</title>
+<style>
+:root{--bg:#07131d;--panel:#0d1b26;--line:#ffffff1c;--text:#f4f8fb;--muted:#9fb0bd;--ok:#4fd174;--warn:#ff9e24;--crit:#ff4d57}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#07131d;color:var(--text)}
+header{padding:24px;background:linear-gradient(100deg,#06121d,#0b3553,#0b4430);border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:clamp(1.8rem,4vw,3rem)}header p{color:#d2e0e9;margin:.5rem 0}
+.meta{color:var(--muted);font-size:.9rem}
+main{max-width:1450px;margin:auto;padding:18px}
+.summary{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px}
+.card,.site{background:#0d1b26;border:1px solid var(--line);border-radius:13px;overflow:hidden}
+.card{padding:15px}.card b{display:block;font-size:2rem;margin-top:7px}.card small{color:var(--muted)}
+.banner{display:block;width:100%;height:auto}.site-body{padding:15px}
+.site-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;padding:15px;border-bottom:1px solid var(--line);background:#081721}
+.site-summary .card{min-height:112px}
+.site-summary .card b{font-size:1.65rem}
+@media(max-width:900px){.site-summary{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:550px){.site-summary{grid-template-columns:1fr 1fr}.site-summary .card:first-child{grid-column:1/-1}}
+.department{padding:14px 0;border-bottom:1px solid var(--line)}.department:last-child{border-bottom:0}
+.department h2{font-size:1.05rem;margin:0 0 10px;display:flex;justify-content:space-between;gap:10px}.department h2 small{color:var(--muted)}
+.rooms{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px}
+.room{padding:12px;border-radius:10px;border:1px solid var(--line);cursor:pointer}
+.room.ok{background:#4fd17418;border-color:#4fd17440}.room.warn{background:#ff9e241d;border-color:#ff9e2455}.room.crit{background:#ff4d5722;border-color:#ff4d5766}
+.temp{font-size:1.45rem;margin:6px 0}.status.ok{color:var(--ok)}.status.warn{color:var(--warn)}.status.crit{color:var(--crit)}
+.updated,.hint{color:var(--muted);font-size:.76rem;margin-top:5px}
+.modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:18px;z-index:50}.modal.open{display:flex}
+.modal-box{width:min(950px,100%);max-height:92vh;overflow:auto;background:#0c1b27;border:1px solid var(--line);border-radius:15px}
+.modal-head{display:flex;justify-content:space-between;padding:18px;border-bottom:1px solid var(--line)}.modal-head h2{margin:0}.modal-head p{margin:5px 0 0;color:var(--muted)}
+.close{background:#ffffff0d;color:#fff;border:1px solid var(--line);border-radius:8px;width:38px;height:38px;font-size:1.3rem}
+.modal-body{padding:18px}.ranges{display:flex;flex-wrap:wrap;gap:8px}.ranges button{padding:8px 11px;border-radius:8px;border:1px solid var(--line);background:#ffffff0d;color:#fff}.ranges button.active{background:#1687d944}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin:14px 0}.stat{padding:11px;border:1px solid var(--line);border-radius:9px}.stat small{color:var(--muted)}.stat b{font-size:1.3rem}
+.chart{width:100%;height:390px;background:#08151f;border:1px solid var(--line);border-radius:10px}
+.error{padding:14px;background:#ff4d5718;border:1px solid #ff4d5766;border-radius:10px;margin-bottom:15px}
+@media(max-width:900px){.summary{grid-template-columns:repeat(2,1fr)}}@media(max-width:550px){.summary,.stats{grid-template-columns:1fr 1fr}.rooms{grid-template-columns:1fr}.summary .card:first-child{grid-column:1/-1}}
+</style>
+</head>
+<body>
+<header>
+<h1>CURANDO KLIMAATMONITOR</h1>
+<p>Live overzicht en historiek van de temperatuurmetingen</p>
+<div class="meta">Laatste update: <span id="lastUpdate">gegevens laden…</span> · Klik op een ruimte voor de historiek</div>
+</header>
+<main>
+<div id="error"></div>
+<div id="summary" class="summary" style="display:none"></div>
+<div id="content">Gegevens laden…</div>
+</main>
+
+<div id="modal" class="modal">
+<div class="modal-box">
+<div class="modal-head"><div><h2 id="mTitle">Historiek</h2><p id="mSub"></p></div><button id="close" class="close">×</button></div>
+<div class="modal-body">
+<p style="margin:0 0 12px;color:#9fb0bd;font-size:.9rem;">Sluiten door te drukken op <strong>×</strong>, buiten het venster of met de <strong>Escape</strong>-toets.</p><div class="ranges">
+<button data-h="24" class="active">24 uur</button><button data-h="72">3 dagen</button><button data-h="168">7 dagen</button><button data-h="720">30 dagen</button><button data-h="0">Alles</button>
+</div>
+<div class="stats"><div class="stat"><small>Huidig</small><b id="cur">—</b></div><div class="stat"><small>Minimum</small><b id="min">—</b></div><div class="stat"><small>Maximum</small><b id="max">—</b></div><div class="stat"><small>Gemiddelde</small><b id="avg">—</b></div></div>
+<svg id="chart" class="chart" viewBox="0 0 900 390" preserveAspectRatio="none"></svg>
+</div></div></div>
+
+<script>
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRCYp9O1teedA7Xnv1zz35P_jWyqNkCmawv6L5DFKvoWqJTB_OdR6Z0uuA2D8fsH67FvWM5UxHpZgjH/pub?gid=887533477&single=true&output=csv";
+let records=[], activeKey=null, hours=24;
+
+function displayLocation(record){
+  if(record.Afdeling==="Morgenster") return "Herdershove";
+  return record.Locatie;
+}
+
+
+function csv(t){let a=[],r=[],f="",q=false;for(let i=0;i<t.length;i++){let c=t[i],n=t[i+1];if(c=='"'){if(q&&n=='"'){f+='"';i++}else q=!q}else if(c==','&&!q){r.push(f);f=""}else if((c=='\n'||c=='\r')&&!q){if(c=='\r'&&n=='\n')i++;r.push(f);if(r.some(x=>x!==""))a.push(r);r=[];f=""}else f+=c}if(f||r.length){r.push(f);a.push(r)}return a}
+function num(v){return Number(String(v).replace(',','.'))}
+function date(v){let d=new Date(v);if(!isNaN(d))return d;let m=String(v).match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4}).*?(\d{1,2}):(\d{2})/);return m?new Date(+m[3],+m[2]-1,+m[1],+m[4],+m[5]):new Date(0)}
+function cls(t){return t>=28?'crit':t>=26?'warn':'ok'}
+function lab(t){return t>=28?'● Kritiek':t>=26?'● Hoog risico':'● OK'}
+function esc(v){return String(v??"").replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;')}
+function key(r){
+  return r.Sensor && r.Sensor.trim()
+    ? r.Sensor.trim()
+    : `${r.Locatie}|${r.Afdeling}|${r.Ruimte}`;
+}
+function roomName(r){
+  if (r.Sensor === "sensor.morgenster_2e09_temperatuur") return "2E09";
+  if (r.Sensor === "sensor.openweathermap_temperatuur") return "Buitentemperatuur";
+  if (String(r.Ruimte).toLowerCase() === "openweather") return "Buitentemperatuur";
+  return r.Ruimte;
+}
+
+async function load(){
+ try{
+  let res=await fetch(CSV_URL,{cache:'no-store'}); if(!res.ok) throw Error(`HTTP ${res.status}`);
+  let rows=csv(await res.text()), h=rows[0].map(x=>x.trim());
+  records=rows.slice(1).map(row=>{let o={};h.forEach((x,i)=>o[x]=row[i]??"");o._temp=num(o.Temperatuur);o._date=date(o.created);return o})
+    .filter(r=>r.Locatie&&r.Afdeling&&r.Ruimte&&Number.isFinite(r._temp)&&r._date.getTime());
+  render();
+ }catch(e){document.getElementById('error').innerHTML=`<div class="error"><b>Gegevens konden niet geladen worden.</b><br>${esc(e.message)}</div>`}
+}
+function render(){
+ let latest=new Map();for(let r of records){let k=key(r),p=latest.get(k);if(!p||r._date>p._date)latest.set(k,r)}
+ let rows=[...latest.values()], hot=[...rows].sort((a,b)=>b._temp-a._temp)[0], newest=[...rows].sort((a,b)=>b._date-a._date)[0];
+ let cr=rows.filter(r=>r._temp>=28).length, wa=rows.filter(r=>r._temp>=26&&r._temp<28).length, ok=rows.filter(r=>r._temp<26).length;
+ document.getElementById('lastUpdate').textContent=newest?newest._date.toLocaleString('nl-BE'):'Onbekend';
+ document.getElementById('summary').innerHTML='';
+ let g={};for(let r of rows){const loc=displayLocation(r);g[loc]??={};g[loc][r.Afdeling]??=[];g[loc][r.Afdeling].push(r)}
+ let out="";
+ for(let loc of ['Herdershove','Sint-Anna']){
+  if(!g[loc])continue;
+  let banner=loc==='Herdershove'?'herdershove-banner.png':'sint-anna-banner.png';
+  const locRows = Object.values(g[loc]).flat();
+  const outside = locRows.find(r=>String(r.Afdeling).toLowerCase()==='buiten' || roomName(r)==='Buitentemperatuur');
+  const roomRows = locRows.filter(r=>r!==outside && String(r.Afdeling).toLowerCase()!=='buiten');
+  const locHot = [...roomRows].sort((a,b)=>b._temp-a._temp)[0];
+  const locCrit = roomRows.filter(r=>r._temp>=28).length;
+  const locWarn = roomRows.filter(r=>r._temp>=26&&r._temp<28).length;
+  const locOk = roomRows.filter(r=>r._temp<26).length;
+  out+=`<section class="site">
+    <img class="banner" src="${banner}" alt="${esc(loc)}">
+    ${outside?`<div class="room ${cls(outside._temp)}" data-key="${esc(key(outside))}" style="margin:14px 15px 0;cursor:pointer;">
+      <b>🌡️ Buitentemperatuur</b>
+      <div class="temp">${outside._temp.toFixed(1)}°C</div>
+      <div class="status ${cls(outside._temp)}">${lab(outside._temp)}</div>
+      <div class="updated">${outside._date.toLocaleString('nl-BE')}</div>
+      <div class="hint">Klik voor historiek</div>
+    </div>`:`<div class="card" style="margin:14px 15px 0;"><small>🌡️ Buitentemperatuur</small><b>—</b></div>`}
+    <div class="site-summary">
+      <div class="card"><small>Warmste ruimte</small><b>${locHot?locHot._temp.toFixed(1)+'°C':'—'}</b><small>${locHot?esc(locHot.Afdeling+' · '+roomName(locHot)):''}</small></div>
+      <div class="card"><small>Kritiek</small><b>🔴 ${locCrit}</b></div>
+      <div class="card"><small>Hoog risico</small><b>🟠 ${locWarn}</b></div>
+      <div class="card"><small>OK</small><b>🟢 ${locOk}</b></div>
+      <div class="card"><small>Totaal ruimtes</small><b>${roomRows.length}</b></div>
+    </div>
+    <div class="site-body">`;
+  const deptEntries = Object.entries(g[loc]).filter(([k])=>k.toLowerCase()!=='buiten').sort((a,b)=>{
+    if(loc==="Herdershove"){
+      const order = [
+        "Schalmei",
+        "Meidoorn",
+        "Bucolica",
+        "Lavogne",
+        "Zomerheide",
+        "Kerry Hill",
+        "Morgenster",
+        "Algemene ruimtes"
+      ];
+      const ai = order.indexOf(a[0]);
+      const bi = order.indexOf(b[0]);
+      if(ai !== -1 || bi !== -1){
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      }
+    }
+    return a[0].localeCompare(b[0]);
+  });
+  for(let [afd,rooms] of deptEntries){
+   let av=rooms.reduce((s,r)=>s+r._temp,0)/rooms.length;
+   out+=`<div class="department"><h2><span>${esc(afd)}</span><small>Gemiddeld ${av.toFixed(1)}°C</small></h2><div class="rooms">`;
+   for(let r of rooms){let c=cls(r._temp);out+=`<div class="room ${c}" data-key="${esc(key(r))}"><b>${esc(roomName(r))}</b><div class="temp">${r._temp.toFixed(1)}°C</div><div class="status ${c}">${lab(r._temp)}</div><div class="updated">${r._date.toLocaleString('nl-BE')}</div><div class="hint">Klik voor historiek</div></div>`}
+   out+='</div></div>';
+  } out+='</div></section>';
+ }
+ document.getElementById('content').innerHTML=out;
+ document.querySelectorAll('[data-key]').forEach(x=>x.onclick=()=>openHist(x.dataset.key));
+}
+function openHist(k){activeKey=k;hours=24;document.querySelectorAll('.ranges button').forEach(b=>b.classList.toggle('active',b.dataset.h==='24'));let selected=records.filter(r=>key(r)===k).sort((a,b)=>b._date-a._date)[0];
+  mTitle.textContent=selected?roomName(selected):"Historiek";
+  mSub.textContent=selected?`${selected.Locatie} · ${selected.Afdeling}`:"";modal.classList.add('open');draw()}
+function draw(){
+ let s=records.filter(r=>key(r)===activeKey).sort((a,b)=>a._date-b._date);if(!s.length)return;
+ if(hours){let cut=new Date(s[s.length-1]._date.getTime()-hours*3600000);s=s.filter(r=>r._date>=cut)}
+ let t=s.map(r=>r._temp), mn=Math.min(...t), mx=Math.max(...t), av=t.reduce((a,b)=>a+b,0)/t.length;
+ cur.textContent=t.at(-1).toFixed(1)+'°C';min.textContent=mn.toFixed(1)+'°C';max.textContent=mx.toFixed(1)+'°C';avg.textContent=av.toFixed(1)+'°C';
+ let W=900,H=390,p=45,span=Math.max(.5,mx-mn), pts=s.map((r,i)=>{let x=p+(i/(Math.max(1,s.length-1)))*(W-2*p),y=H-p-((r._temp-mn)/span)*(H-2*p);return `${x.toFixed(1)},${y.toFixed(1)}`}).join(' ');
+ let grid='';for(let i=0;i<5;i++){let y=p+i*(H-2*p)/4;grid+=`<line x1="${p}" y1="${y}" x2="${W-p}" y2="${y}" stroke="#ffffff14"/><text x="5" y="${y+4}" fill="#9fb0bd" font-size="14">${(mx-i*span/4).toFixed(1)}°</text>`}
+ chart.innerHTML=`${grid}<polyline fill="none" stroke="#48a8ff" stroke-width="4" points="${pts}"/><text x="${p}" y="${H-10}" fill="#9fb0bd" font-size="14">${s[0]._date.toLocaleString('nl-BE')}</text><text x="${W-p}" y="${H-10}" fill="#9fb0bd" font-size="14" text-anchor="end">${s.at(-1)._date.toLocaleString('nl-BE')}</text>`;
+}
+const modal=document.getElementById('modal');
+const closeBtn=document.getElementById('close');
+const mTitle=document.getElementById('mTitle');
+const mSub=document.getElementById('mSub');
+const cur=document.getElementById('cur');
+const min=document.getElementById('min');
+const max=document.getElementById('max');
+const avg=document.getElementById('avg');
+const chart=document.getElementById('chart');
+closeBtn.onclick=()=>modal.classList.remove('open');
+modal.onclick=e=>{if(e.target===modal)modal.classList.remove('open')};
+document.addEventListener('keydown',e=>{if(e.key==='Escape')modal.classList.remove('open');});
+document.querySelectorAll('.ranges button').forEach(b=>b.onclick=()=>{hours=Number(b.dataset.h);document.querySelectorAll('.ranges button').forEach(x=>x.classList.remove('active'));b.classList.add('active');draw()})
+load();setInterval(load,300000);
+</script>
+</body></html>
