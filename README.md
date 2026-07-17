@@ -1,2 +1,2 @@
 # curando-klimaatmonitor
-Curando Klimaatmonitor
+Curando-Noord Klimaatmonitor
